@@ -1,0 +1,248 @@
+---
+title: "Sampling"
+author: "Pierre Barry"
+date: "`r format(Sys.time(), '%d %B, %Y, %H:%M')`"
+output: 
+  flexdashboard::flex_dashboard:
+  theme: paper
+orientation: rows
+social: menu
+source_code: embed
+vertical_layout: scroll
+---
+  
+```{r global, include=FALSE}
+list.of.packages <- c("RColorBrewer","sf","rnaturalearth","rnaturalearthdata","ggplot2","ggsn","leaflet","DT","dplyr","plotly")
+
+for (i in list.of.packages){
+  if (i %in% installed.packages()[,"Package"] == FALSE){
+    install.packages(i)
+  }
+  eval(bquote(library(.(i))))
+}
+```
+
+```{r, include = FALSE}
+color_med_atl=data.frame(Location=c("Gulf of Lion","Costa Calida","Algarve","Bay of Biscay"),
+                         Col=brewer.pal(n = 4, name = "RdBu"))
+```
+
+Sampling {data-icon="fa-map"}
+=======================================================================
+  
+```{r}
+load(file=paste(path,"/data/sampling/sampling.Rdata",sep=""))
+sampling$lon=as.numeric(sampling$lon)
+sampling$lat=as.numeric(sampling$lat)
+for (i in 1:nrow(sampling)){
+  if (sampling$LOCATION[i]=="Mar Menor"){
+    sampling$LOCATION[i]="Costa Calida"
+  }
+}
+sampling$LOCATION=factor(sampling$LOCATION)
+sites <- st_as_sf(data.frame(longitude = sampling[is.na(sampling$lon)==FALSE,]$lon, 
+                             latitude = sampling[is.na(sampling$lat)==FALSE,]$lat, 
+                             loc=sampling[is.na(sampling$lon)==FALSE,]$LOCATION,
+                             detail_loc=sampling[is.na(sampling$lon)==FALSE,]$DETAILED_LOCATION,
+                             sp=sampling[is.na(sampling$lon)==FALSE,]$SPECIES_CODE),
+                  coords = c("longitude", "latitude"),
+                  crs = 4326,
+                  agr = "constant"
+)
+col=c()
+for (i in 1:length(sites$loc)){
+  col[i]=as.character(color_med_atl$Col[which(sites$loc[i]==color_med_atl$Location)])
+}
+sites$col=as.character(col)
+world <- ne_countries(scale='medium',returnclass = 'sf')
+lon <- c (-10, 10)
+lat <- c (35, 47.5)
+
+all<-ggplot(data = world) +
+  geom_sf(fill="grey") +
+  geom_sf(data = sites, size = 2, shape = 1, col=col,aes(label=detail_loc)) +
+  coord_sf(xlim = c(-10, 10), ylim = c(35,47.5), expand = FALSE)+
+  annotate(geom = "text", x = 5, y = 38, label = "Mediterranean \n Sea", 
+           fontface = "italic", color = "grey22", size = 5.5) +
+  annotate(geom = "text", x = -7.5, y = 45, label = "Atlantic \n Ocean", 
+           fontface = "italic", color = "grey22", size = 5.5) +
+  annotate(geom = "text", x = 5, y = 42.35, label = "Gulf of \n Lion", 
+           size = 4) +
+  annotate(geom = "text", x = 0.75, y = 37.25, label = "Costa \n Calida", 
+           size = 4) +
+  annotate(geom = "text", x = -8, y = 36.5, label = "Algarve", 
+           size = 4) +
+  annotate(geom = "text", x = -2.85, y = 44.5, label = "Bay of \n Biscay", 
+           size = 4) +
+  theme(plot.tag.position = 'topleft')+
+  xlab("")+
+  ylab("")+
+  scalebar(dist = 250, 
+           dist_unit = "km", 
+           model = 'WGS84',
+           st.size = 2.5,
+           transform=TRUE,
+           x.min=8,
+           x.max=9,
+           y.min=36,
+           y.max=45)+
+  north(x.min=-9,x.max=-5,
+        y.min=46,y.max=47)+
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = NA),
+        legend.position = "none")
+Icons <- iconList(Li = makeIcon("Data/red.png"),
+                  Mu = makeIcon("Data/orange.png"),
+                  Fa = makeIcon("Data/lightblue.png"),
+                  Ga = makeIcon("Data/blue.png"))
+correspondance=data.frame(COMPLETE=levels(sampling$LOCATION),
+                          SHORT=c("Fa","Ga","Mu","Li"))
+
+group=c()
+for (i in 1:nrow(sampling)){
+  group[i]=correspondance[which(sampling$LOCATION[i]==correspondance[,1]),2]
+}
+sampling$group=group
+
+getColor <- function(sampling) {
+  sapply(sampling$LOCATION, function(mag) {
+    if(mag =="Gulf of Lion") {
+      "red"
+    } else if(mag == "Costa Calida") {
+      "orange"
+    } else if (mag =="Algarve"){
+      "blue"
+    } else {
+      "darkblue"
+    } })
+}
+
+icons <- awesomeIcons(
+  icon = 'ios-close',
+  iconColor = 'black',
+  library = 'ion',
+  markerColor = getColor(sampling)
+)
+```
+
+Row {data-height=1000}
+-----------------
+  
+### Map {data-width=250}
+  
+```{r}
+leaflet(sampling) %>% addTiles() %>%
+  setView(lng = 0, lat = 42.5, zoom = 5) %>%
+  addAwesomeMarkers(~lon, ~lat, icon=icons, 
+                    popup = ~as.character(SAMPLE), 
+                    label = ~as.character(SAMPLE))
+```
+
+
+### Table {data-width=750}
+
+```{r}
+datatable(sampling, 
+          class = 'cell-border stripe',
+          rownames = FALSE,
+          filter = 'top', options = list(
+            pageLength = 100,scrollY=750,autowidth=T))
+```
+
+
+Row {data-height=750}
+-----------------
+  
+### Statistics global
+  
+```{r}
+sampling$misc=rep(1,nrow(sampling))
+for (i in 1:nrow(sampling)){
+  if (sampling$Capture_Method[i]=="Fishing"){
+    sampling$Capture_Method[i]="Fishing rods"
+  }
+}
+method<-as.data.frame(tapply(sampling$misc,sampling$Capture_Method,sum))
+#method=rbind(method,(6*21*4)-sum(method$`tapply(sampling$misc, qgis$Capture_Method, sum)`))
+method$Method=c("Collaborators","Fish market","Fishing rods","Hand nets","Spear fishing")
+colnames(method)=c("Freq","Method")
+
+prop=c()
+for (i in 1:length(method$Method)){
+  
+  prop[i]=method$Freq[i]/(sum(method$Freq))
+  
+}
+
+method$prop=prop
+
+method <- method %>%
+  arrange(desc(Method)) %>%
+  mutate(lab.ypos = cumsum(prop) - 0.5*prop)
+
+#method$color=c("#EFC000FF","#CD534CFF","#0073C2FF","#868686FF")
+
+pp<-ggplot(method, aes(x = 2, y = prop, fill = Method)) +
+  geom_bar(stat = "identity", color = "white") +
+  #coord_polar(theta = "y", start = 0)+
+  geom_text(aes(y = lab.ypos, label = Freq), color = "white")+
+  scale_fill_viridis_d() +
+  theme_bw()+
+  #xlim(0.5, 2.5)+
+  xlab("")+
+  ylab("Proportion")+
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank())+
+  labs(title="Number of catches per methods of capture")
+ggplotly(pp)
+```
+
+### Statistics global per location
+
+```{r}
+method<-as.data.frame(tapply(sampling$misc,list(sampling$LOCATION,sampling$Capture_Method),sum))
+
+
+method_int<-data.frame(Location=c(rep("Faro",5),rep("Gascogne",5),rep("Lion",5),rep("Murcia",5)),
+                       Method=rep(c("Collaborators","Fish market","Fishing rods","Hand nets","Spear fishing"),4),
+                       value=rep(0,4*5))
+
+a=0
+for (i in 1:4){
+  
+  for (j in 1:5){
+    
+    a=a+1
+    
+    method_int$value[a]=method[i,j]
+    
+  }
+  
+  
+}
+
+method=method_int
+
+specie <- c(rep("sorgho" , 3) , rep("poacee" , 3) , rep("banana" , 3) , rep("triticum" , 3) )
+condition <- rep(c("normal" , "stress" , "Nitrogen") , 4)
+value <- abs(rnorm(12 , 0 , 15))
+data <- data.frame(specie,condition,value)
+
+ppp<-ggplot(method, aes(fill=Method, y=value, x=Location)) + 
+  geom_bar(position="stack", stat="identity")+
+  labs(title="Number of catches per methods ofcapture per location")+
+  scale_fill_viridis_d()+
+  ylab("Number")+
+  theme_bw()
+
+
+ggplotly(ppp)
+```
+
+Packages used {data-icon="fa-map"}
+=======================================================================
+
+```{r}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+``` 
